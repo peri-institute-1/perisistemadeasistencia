@@ -35,7 +35,7 @@ jobs:
     - name: 🔧 Configurar variables de entorno
       env:
         GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-        GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_FILE }}
       run: |
         echo "✅ Variables de entorno configuradas"
         echo "📊 Sheet ID configurado: $(echo $GOOGLE_SHEET_ID | cut -c1-10)..."
@@ -44,7 +44,9 @@ jobs:
     - name: 🎯 Ejecutar Sistema de Asistencia
       env:
         GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-        GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_FILE }}
+        GMAIL_USER: ${{ secrets.GMAIL_USER }}
+        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
       run: |
         echo "🚀 Iniciando proceso de asistencia automatizado..."
         echo "⏰ Hora de ejecución: $(date)"
