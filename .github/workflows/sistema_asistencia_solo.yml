@@ -42,7 +42,7 @@ jobs:
     
     - name: Crear archivo de credenciales de Google
       run: |
-        echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > sistemaasistencia-470019-3f3d35327bca.json
+        echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_FILE }}' > sistemaasistencia-470019-3f3d35327bca.json
     
     - name: Ejecutar Sistema de Asistencia
       run: |
