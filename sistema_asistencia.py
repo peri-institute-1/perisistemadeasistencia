@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# 📦 IMPORTACIONES
 import os
 import pandas as pd
 from datetime import datetime
@@ -13,19 +12,16 @@ import smtplib
 from email.message import EmailMessage
 
 def configurar_google_sheets():
-    """Configura la conexión a Google Sheets"""
     load_dotenv()
     SHEET_ID = os.getenv('GOOGLE_SHEET_ID')
     SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
     
     SERVICE_ACCOUNT_FILE = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE')
     if SERVICE_ACCOUNT_FILE and os.path.exists(SERVICE_ACCOUNT_FILE):
-        print("🔑 Usando archivo JSON local para autenticación")
         creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
     else:
         SERVICE_ACCOUNT_JSON = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
         if SERVICE_ACCOUNT_JSON:
-            print("🔑 Usando JSON desde variable de entorno para autenticación")
             service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
             creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
         else:
@@ -35,15 +31,9 @@ def configurar_google_sheets():
     return service, SHEET_ID
 
 def leer_hoja(service, sheet_id, nombre_hoja):
-    """Lee TODA la hoja completa"""
     try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=sheet_id, 
-            range=nombre_hoja
-        ).execute()
-        
+        result = service.spreadsheets().values().get(spreadsheetId=sheet_id, range=nombre_hoja).execute()
         values = result.get('values', [])
-        
         if values:
             if len(values) > 1:
                 headers = values[0]
@@ -52,52 +42,41 @@ def leer_hoja(service, sheet_id, nombre_hoja):
                 df = pd.DataFrame(data_rows, columns=headers)
             else:
                 df = pd.DataFrame(values)
-            print(f"✅ Se leyeron {len(df)} filas de {nombre_hoja}")
             return df
-        else:
-            print(f"❌ No se encontraron datos en {nombre_hoja}")
-            return None
+        return None
     except Exception as e:
         print(f"❌ Error al leer la hoja {nombre_hoja}: {e}")
         return None
 
 def procesar_reportes_hoy():
-    """Procesa reportes para colaboradores con fecha de pago HOY"""
     print("🚀 === PROCESANDO REPORTES PARA HOY ===")
     try:
         service, sheet_id = configurar_google_sheets()
-        print(f"📊 Conectado a Google Sheet: {sheet_id}")
         
         hoy = datetime.today()
         fecha_hoy_str = hoy.strftime("%d/%m/%Y")
-        print(f"📅 Fecha actual: {fecha_hoy_str}")
         
-        print("\n📊 Cargando datos de Google Sheets...")
         df_pagos_check = leer_hoja(service, sheet_id, 'PAGOSCHECK')
         df_pagos_data = leer_hoja(service, sheet_id, 'PAGOS')
         df_calendario = leer_hoja(service, sheet_id, 'REGISTRO_CALENDARIO')
         df_vendedoras = leer_hoja(service, sheet_id, 'VENDEDORAS')
         
         if any(df is None for df in [df_pagos_check, df_pagos_data, df_calendario, df_vendedoras]):
-            print("❌ Error cargando datos necesarios")
             return False
         
-        # FIX FECHAS: Convertir a datetime para comparaciones exactas
         df_pagos_check['fecha_pago_dt'] = pd.to_datetime(df_pagos_check['fecha_pago'], format="%d/%m/%Y", errors='coerce')
         hoy_dt = pd.to_datetime(hoy.strftime("%Y-%m-%d"))
         
         colaboradores_hoy = df_pagos_check[df_pagos_check['fecha_pago_dt'] == hoy_dt]
         
         if colaboradores_hoy.empty:
-            print(f"ℹ️  No hay colaboradores con fecha de pago exacta para hoy ({fecha_hoy_str})")
+            print("ℹ️ No hay colaboradores con fecha de pago para hoy.")
             return True
-        
-        print(f"\n✅ Encontrados {len(colaboradores_hoy)} colaborador(es) para HOY:")
-        
+            
         directorio_reportes = "Reportes_Asistencia"
         if not os.path.exists(directorio_reportes):
             os.makedirs(directorio_reportes)
-        
+            
         load_dotenv()
         gmail_user = os.getenv('GMAIL_USER')
         gmail_password = os.getenv('GMAIL_APP_PASSWORD')
@@ -111,15 +90,12 @@ def procesar_reportes_hoy():
             periodo_inicio = str(row.get('periodo_inicio', '')).strip()
             periodo_fin = str(row.get('periodo_fin', '')).strip()
             
-            print(f"\n🔄 Procesando: {colaborador}")
-            
             try:
                 fecha_inicio_dt = datetime.strptime(periodo_inicio, "%d/%m/%Y")
                 fecha_fin_dt = datetime.strptime(periodo_fin, "%d/%m/%Y")
                 
                 df_colaborador = df_calendario[df_calendario['Colaborador'].astype(str).str.strip() == colaborador].copy()
                 if df_colaborador.empty:
-                    print(f"   ⚠️  No hay registros para {colaborador}")
                     continue
                 
                 df_colaborador['FechaEntrada_dt'] = pd.to_datetime(df_colaborador['FechaEntrada'], format="%d/%m/%Y", errors='coerce')
@@ -129,16 +105,48 @@ def procesar_reportes_hoy():
                 ].drop(columns=['FechaEntrada_dt'])
                 
                 if df_asistencia.empty:
-                    print(f"   ⚠️  No hay asistencia en el período {periodo_inicio} - {periodo_fin}")
                     continue
                 
+                # --- MAGIA DEL RESUMEN EN EL EXCEL ---
+                pago_match = df_pagos_data[
+                    (df_pagos_data['Colaborador'].astype(str).str.strip() == colaborador) &
+                    (df_pagos_data['periodo_inicio'].astype(str).str.strip() == periodo_inicio)
+                ]
+                
+                horas_totales = 0
+                monto_total = 0
+                moneda = "Soles"
+                
+                if not pago_match.empty:
+                    reg = pago_match.iloc[0]
+                    h_norm = float(str(reg.get('horas_normales', '0')).replace(',', '.'))
+                    h_ext = float(str(reg.get('horas_extra', '0')).replace(',', '.'))
+                    horas_totales = h_norm + h_ext
+                    monto_total = float(str(reg.get('monto_total', '0')).replace(',', '.'))
+                    moneda = str(reg.get('moneda', 'Soles')).strip()
+                
+                columnas = list(df_asistencia.columns)
+                fila_vacia = {col: '' for col in columnas}
+                fila_titulo = {col: '' for col in columnas}
+                fila_titulo[columnas[0]] = '=== RESUMEN DEL PERIODO ==='
+                
+                fila_horas = {col: '' for col in columnas}
+                fila_horas[columnas[0]] = 'TOTAL HORAS:'
+                fila_horas[columnas[1]] = f"{round(horas_totales, 2)} hrs"
+                
+                fila_monto = {col: '' for col in columnas}
+                fila_monto[columnas[0]] = 'MONTO TOTAL:'
+                fila_monto[columnas[1]] = f"{round(monto_total, 2)} {moneda}"
+                
+                df_resumen = pd.DataFrame([fila_vacia, fila_titulo, fila_horas, fila_monto])
+                df_final = pd.concat([df_asistencia, df_resumen], ignore_index=True)
+                # ----------------------------------------
+
                 nombre_archivo = f"Reporte_{colaborador.replace(' ', '_')}_{fecha_pago.replace('/', '-')}.xlsx"
                 ruta_archivo = os.path.join(directorio_reportes, nombre_archivo)
-                df_asistencia.to_excel(ruta_archivo, index=False, engine='openpyxl')
+                df_final.to_excel(ruta_archivo, index=False, engine='openpyxl')
                 
                 estado_correo = "No configurado"
-                email_colab = "N/A"
-                
                 if enviar_correos:
                     v_match = df_vendedoras[df_vendedoras['Colaborador'].astype(str).str.strip() == colaborador]
                     if not v_match.empty and str(v_match.iloc[0].get('Correo', '')).strip() != 'nan':
@@ -147,8 +155,6 @@ def procesar_reportes_hoy():
                             estado_correo = "Enviado"
                         else:
                             estado_correo = "Error"
-                    else:
-                        estado_correo = "Sin email"
                 
                 resultados.append({
                     'Colaborador': colaborador,
@@ -159,13 +165,12 @@ def procesar_reportes_hoy():
                 })
                 
             except Exception as e:
-                print(f"   ❌ Error procesando {colaborador}: {e}")
+                print(f"❌ Error con {colaborador}: {e}")
                 
         if resultados:
-            resumen_horas = calcular_resumen_horas(resultados, df_pagos_data, df_vendedoras)
-            if enviar_resumen_administrativo(resumen_horas, fecha_hoy_str, resultados, gmail_user, gmail_password):
-                print(f"✅ Resumen enviado a nitza.peri.d@gmail.com")
-                
+            resumen_horas = calcular_resumen_horas(resultados, df_pagos_data)
+            enviar_resumen_administrativo(resumen_horas, fecha_hoy_str, resultados, gmail_user, gmail_password)
+            
         return True
     except Exception as e:
         print(f"❌ Error general: {e}")
@@ -178,14 +183,7 @@ def enviar_correo_con_excel(destinatario, colaborador, archivo_excel, fecha_pago
         msg['From'] = user
         msg['To'] = destinatario
         
-        cuerpo = f"""Estimado/a {colaborador},
-
-Te enviamos tu reporte de asistencia correspondiente al periodo de pago: {fecha_pago}.
-En el archivo adjunto encontraras el detalle de tus registros.
-
-Saludos cordiales,
-Equipo de Proyectos de Peri Company
-"""
+        cuerpo = f"Estimado/a {colaborador},\n\nTe enviamos tu reporte de asistencia correspondiente al periodo de pago: {fecha_pago}.\nAl final del archivo adjunto encontrarás el resumen de tus horas totales y el monto a pagar.\n\nSaludos,\nEquipo Peri Company"
         msg.set_content(cuerpo)
         
         with open(archivo_excel, 'rb') as f:
@@ -196,36 +194,25 @@ Equipo de Proyectos de Peri Company
             server.login(user, password)
             server.send_message(msg)
         return True
-    except Exception as e:
-        print(f"❌ Error correo: {e}")
+    except:
         return False
 
-def calcular_resumen_horas(resultados, df_pagos_data, df_vendedoras):
+def calcular_resumen_horas(resultados, df_pagos_data):
     resumen = {}
     for res in resultados:
         colaborador = res['Colaborador']
         per_str = res['Periodo'].split(" - ")
-        
-        # Buscar en PAGOS
         pago_match = df_pagos_data[
             (df_pagos_data['Colaborador'].astype(str).str.strip() == colaborador) &
             (df_pagos_data['periodo_inicio'].astype(str).str.strip() == per_str[0])
         ]
-        
-        if pago_match.empty:
-            continue
-            
+        if pago_match.empty: continue
         reg = pago_match.iloc[0]
         h_norm = float(str(reg.get('horas_normales', '0')).replace(',', '.'))
         h_ext = float(str(reg.get('horas_extra', '0')).replace(',', '.'))
         monto = float(str(reg.get('monto_total', '0')).replace(',', '.'))
-        moneda = str(reg.get('moneda', 'Soles')).strip() # FIX MONEDA
-        
-        resumen[colaborador] = {
-            'horas': h_norm + h_ext,
-            'monto': monto,
-            'moneda': moneda
-        }
+        moneda = str(reg.get('moneda', 'Soles')).strip()
+        resumen[colaborador] = {'horas': h_norm + h_ext, 'monto': monto, 'moneda': moneda}
     return resumen
 
 def enviar_resumen_administrativo(resumen, fecha_hoy_str, resultados, user, password):
@@ -235,35 +222,26 @@ def enviar_resumen_administrativo(resumen, fecha_hoy_str, resultados, user, pass
         msg['Subject'] = f'📊 Resumen de Reportes de Asistencia - {fecha_hoy_str}'
         msg['From'] = user
         msg['To'] = 'nitza.peri.d@gmail.com'
-
         cuerpo = f"Se han procesado los reportes de la fecha: {fecha_hoy_str}\n\nResumen de Pagos:\n"
-        
         for col, dat in resumen.items():
-            # MUESTRA LA MONEDA DINÁMICA
             cuerpo += f"• {col}: {round(dat['horas'], 2)} horas -> {round(dat['monto'], 2)} {dat['moneda']}\n"
-            
         cuerpo += "\nSistema Automatizado de Asistencia."
         msg.set_content(cuerpo)
-        
         for res in resultados:
             ruta = os.path.join("Reportes_Asistencia", res['Archivo_Excel'])
             if os.path.exists(ruta):
                 with open(ruta, 'rb') as f:
                     msg.add_attachment(f.read(), maintype='application', subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename=res['Archivo_Excel'])
-                    
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
             server.login(user, password)
             server.send_message(msg)
         return True
-    except Exception as e:
-        print(f"❌ Error resumen adm: {e}")
+    except:
         return False
 
 if __name__ == "__main__":
     if procesar_reportes_hoy():
-        print("\n✅ Script finalizado correctamente")
         exit(0)
     else:
-        print("\n❌ Script falló")
         exit(1)
