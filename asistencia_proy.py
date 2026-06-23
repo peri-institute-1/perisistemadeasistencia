@@ -42,7 +42,6 @@ def leer_hoja(service, sheet_id, nombre_hoja):
                 df = pd.DataFrame(data_rows, columns=headers)
             else:
                 df = pd.DataFrame(values)
-            print(f"✅ Se leyeron {len(df)} filas de {nombre_hoja}")
             return df
         return None
     except Exception as e:
@@ -56,7 +55,6 @@ def procesar_reportes_hoy():
         
         hoy = datetime.today()
         fecha_hoy_str = hoy.strftime("%d/%m/%Y")
-        print(f"📅 Fecha actual: {fecha_hoy_str}")
         
         df_pagos_check = leer_hoja(service, sheet_id, 'CHECKPROY')
         df_pagos_proy = leer_hoja(service, sheet_id, 'PAGOSPROY')
@@ -66,14 +64,13 @@ def procesar_reportes_hoy():
         if any(df is None for df in [df_pagos_check, df_pagos_proy, df_calendario, df_vendedoras]):
             return False
         
-        # FIX FECHAS
         df_pagos_check['fecha_pago_dt'] = pd.to_datetime(df_pagos_check['fecha_pago'], format="%d/%m/%Y", errors='coerce')
         hoy_dt = pd.to_datetime(hoy.strftime("%Y-%m-%d"))
         
         colaboradores_hoy = df_pagos_check[df_pagos_check['fecha_pago_dt'] == hoy_dt]
         
         if colaboradores_hoy.empty:
-            print(f"ℹ️  No hay colaboradores de PROYECTOS con fecha de pago para hoy.")
+            print("ℹ️ No hay colaboradores de PROYECTOS para hoy.")
             return True
             
         directorio_reportes = "Reportes_Asistencia"
@@ -93,8 +90,6 @@ def procesar_reportes_hoy():
             periodo_inicio = str(row.get('periodo_inicio', '')).strip()
             periodo_fin = str(row.get('periodo_fin', '')).strip()
             
-            print(f"\n🔄 Procesando: {colaborador}")
-            
             try:
                 fecha_inicio_dt = datetime.strptime(periodo_inicio, "%d/%m/%Y")
                 fecha_fin_dt = datetime.strptime(periodo_fin, "%d/%m/%Y")
@@ -112,12 +107,46 @@ def procesar_reportes_hoy():
                 if df_asistencia.empty:
                     continue
                 
+                # --- MAGIA DEL RESUMEN EN EL EXCEL ---
+                pago_match = df_pagos_proy[
+                    (df_pagos_proy['Colaborador'].astype(str).str.strip() == colaborador) &
+                    (df_pagos_proy['periodo_inicio'].astype(str).str.strip() == periodo_inicio)
+                ]
+                
+                horas_totales = 0
+                monto_total = 0
+                moneda = "Soles"
+                
+                if not pago_match.empty:
+                    reg = pago_match.iloc[0]
+                    h_norm = float(str(reg.get('horas_normales', '0')).replace(',', '.'))
+                    h_ext = float(str(reg.get('horas_extra', '0')).replace(',', '.'))
+                    horas_totales = h_norm + h_ext
+                    monto_total = float(str(reg.get('monto_total', '0')).replace(',', '.'))
+                    moneda = str(reg.get('moneda', 'Soles')).strip()
+                
+                columnas = list(df_asistencia.columns)
+                fila_vacia = {col: '' for col in columnas}
+                fila_titulo = {col: '' for col in columnas}
+                fila_titulo[columnas[0]] = '=== RESUMEN DEL PERIODO ==='
+                
+                fila_horas = {col: '' for col in columnas}
+                fila_horas[columnas[0]] = 'TOTAL HORAS:'
+                fila_horas[columnas[1]] = f"{round(horas_totales, 2)} hrs"
+                
+                fila_monto = {col: '' for col in columnas}
+                fila_monto[columnas[0]] = 'MONTO TOTAL:'
+                fila_monto[columnas[1]] = f"{round(monto_total, 2)} {moneda}"
+                
+                df_resumen = pd.DataFrame([fila_vacia, fila_titulo, fila_horas, fila_monto])
+                df_final = pd.concat([df_asistencia, df_resumen], ignore_index=True)
+                # ----------------------------------------
+                
                 nombre_archivo = f"Reporte_Proyectos_{colaborador.replace(' ', '_')}_{fecha_pago.replace('/', '-')}.xlsx"
                 ruta_archivo = os.path.join(directorio_reportes, nombre_archivo)
-                df_asistencia.to_excel(ruta_archivo, index=False, engine='openpyxl')
+                df_final.to_excel(ruta_archivo, index=False, engine='openpyxl')
                 
                 estado_correo = "No configurado"
-                
                 if enviar_correos:
                     v_match = df_vendedoras[df_vendedoras['Colaborador'].astype(str).str.strip() == colaborador]
                     if not v_match.empty and str(v_match.iloc[0].get('Correo', '')).strip() != 'nan':
@@ -126,8 +155,6 @@ def procesar_reportes_hoy():
                             estado_correo = "Enviado"
                         else:
                             estado_correo = "Error"
-                    else:
-                        estado_correo = "Sin email"
                 
                 resultados.append({
                     'Colaborador': colaborador,
@@ -138,7 +165,7 @@ def procesar_reportes_hoy():
                 })
                 
             except Exception as e:
-                print(f"   ❌ Error: {e}")
+                print(f"❌ Error con {colaborador}: {e}")
                 
         if resultados:
             resumen_horas = calcular_resumen_horas_proyectos(resultados, df_pagos_proy)
@@ -155,13 +182,10 @@ def enviar_correo_con_excel(destinatario, colaborador, archivo_excel, fecha_pago
         msg['Subject'] = f'Reporte de Asistencia (Proyectos) - {colaborador} ({fecha_pago})'
         msg['From'] = user
         msg['To'] = destinatario
-        
-        cuerpo = f"Estimado/a {colaborador},\n\nTe enviamos tu reporte de asistencia de PROYECTOS correspondiente al periodo de pago: {fecha_pago}.\n\nSaludos,\nEquipo de Proyectos"
+        cuerpo = f"Estimado/a {colaborador},\n\nTe enviamos tu reporte de asistencia de PROYECTOS correspondiente al periodo de pago: {fecha_pago}.\nAl final del archivo adjunto encontrarás el resumen de tus horas totales y el monto a pagar.\n\nSaludos,\nEquipo Peri Company"
         msg.set_content(cuerpo)
-        
         with open(archivo_excel, 'rb') as f:
             msg.add_attachment(f.read(), maintype='application', subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename=os.path.basename(archivo_excel))
-            
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
             server.login(user, password)
@@ -175,25 +199,17 @@ def calcular_resumen_horas_proyectos(resultados, df_pagos_proy):
     for res in resultados:
         colaborador = res['Colaborador']
         per_str = res['Periodo'].split(" - ")
-        
         pago_match = df_pagos_proy[
             (df_pagos_proy['Colaborador'].astype(str).str.strip() == colaborador) &
             (df_pagos_proy['periodo_inicio'].astype(str).str.strip() == per_str[0])
         ]
-        
         if pago_match.empty: continue
-            
         reg = pago_match.iloc[0]
         h_norm = float(str(reg.get('horas_normales', '0')).replace(',', '.'))
         h_ext = float(str(reg.get('horas_extra', '0')).replace(',', '.'))
         monto = float(str(reg.get('monto_total', '0')).replace(',', '.'))
-        moneda = str(reg.get('moneda', 'Soles')).strip() # FIX MONEDA DINÁMICA
-        
-        resumen[colaborador] = {
-            'horas': h_norm + h_ext,
-            'monto': monto,
-            'moneda': moneda
-        }
+        moneda = str(reg.get('moneda', 'Soles')).strip()
+        resumen[colaborador] = {'horas': h_norm + h_ext, 'monto': monto, 'moneda': moneda}
     return resumen
 
 def enviar_resumen_administrativo(resumen, fecha_hoy_str, resultados, user, password):
@@ -203,21 +219,16 @@ def enviar_resumen_administrativo(resumen, fecha_hoy_str, resultados, user, pass
         msg['Subject'] = f'📊 Resumen PROYECTOS - {fecha_hoy_str}'
         msg['From'] = user
         msg['To'] = 'nitza.peri.d@gmail.com'
-
         cuerpo = f"Se han procesado los reportes de PROYECTOS de la fecha: {fecha_hoy_str}\n\nResumen de Pagos:\n"
-        
         for col, dat in resumen.items():
             cuerpo += f"• {col}: {round(dat['horas'], 2)} horas -> {round(dat['monto'], 2)} {dat['moneda']}\n"
-            
         cuerpo += "\nSistema Automatizado de Proyectos."
         msg.set_content(cuerpo)
-        
         for res in resultados:
             ruta = os.path.join("Reportes_Asistencia", res['Archivo_Excel'])
             if os.path.exists(ruta):
                 with open(ruta, 'rb') as f:
                     msg.add_attachment(f.read(), maintype='application', subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename=res['Archivo_Excel'])
-                    
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
             server.login(user, password)
@@ -228,8 +239,6 @@ def enviar_resumen_administrativo(resumen, fecha_hoy_str, resultados, user, pass
 
 if __name__ == "__main__":
     if procesar_reportes_hoy():
-        print("\n✅ Script finalizado correctamente")
         exit(0)
     else:
-        print("\n❌ Script falló")
         exit(1)
