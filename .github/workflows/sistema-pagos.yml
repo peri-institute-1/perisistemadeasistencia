@@ -26,31 +26,30 @@ jobs:
       - name: 🐍 Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: 📦 Instalar Librerías
         run: |
           python -m pip install --upgrade pip
           pip install pandas openpyxl python-dotenv google-auth google-api-python-client
 
-      - name: 🔐 Configurar Credenciales (Secrets)
-        env:
-          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        run: |
-          echo "GOOGLE_SHEET_ID=$GOOGLE_SHEET_ID" >> .env
-          echo "GOOGLE_SERVICE_ACCOUNT_JSON=$GOOGLE_SERVICE_ACCOUNT_JSON" >> .env
-          echo "GMAIL_USER=$GMAIL_USER" >> .env
-          echo "GMAIL_APP_PASSWORD=$GMAIL_APP_PASSWORD" >> .env
-
       - name: 📩 Ejecutar Sistema de Colaboradores
         if: github.event.inputs.script_to_run == 'ambos' || github.event.inputs.script_to_run == 'solo_colaboradores' || github.event_name == 'schedule'
+        env:
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          # Esta línea asegura que funcione sin importar si usaste el nombre viejo o el nuevo
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON || secrets.GOOGLE_SERVICE_ACCOUNT_FILE }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python sistema_asistencia.py
 
       - name: 🚀 Ejecutar Sistema de Proyectos
         if: github.event.inputs.script_to_run == 'ambos' || github.event.inputs.script_to_run == 'solo_proyectos' || github.event_name == 'schedule'
+        env:
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON || secrets.GOOGLE_SERVICE_ACCOUNT_FILE }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python asistencia_proy.py
 
       - name: 📁 Guardar Copia de los Excel Generados
