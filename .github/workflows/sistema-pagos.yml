@@ -19,6 +19,8 @@ on:
 jobs:
   ejecutar-reportes:
     runs-on: ubuntu-latest
+    env:
+      TZ: 'America/Lima' # 🇵🇪 Fuerza a todo el servidor a pensar que está en Perú
     steps:
       - name: 📥 Clonar el repositorio
         uses: actions/checkout@v4
@@ -37,7 +39,6 @@ jobs:
         if: github.event.inputs.script_to_run == 'ambos' || github.event.inputs.script_to_run == 'solo_colaboradores' || github.event_name == 'schedule'
         env:
           GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
-          # Esta línea asegura que funcione sin importar si usaste el nombre viejo o el nuevo
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON || secrets.GOOGLE_SERVICE_ACCOUNT_FILE }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
