@@ -128,7 +128,8 @@ def procesar_reportes_hoy():
                 columnas = list(df_asistencia.columns)
                 fila_vacia = {col: '' for col in columnas}
                 fila_titulo = {col: '' for col in columnas}
-                fila_titulo[columnas[0]] = '=== RESUMEN DEL PERIODO ==='
+                # Corrección del ERROR en Excel usando guiones
+                fila_titulo[columnas[0]] = '--- RESUMEN DEL PERIODO ---'
                 
                 fila_horas = {col: '' for col in columnas}
                 fila_horas[columnas[0]] = 'TOTAL HORAS:'
